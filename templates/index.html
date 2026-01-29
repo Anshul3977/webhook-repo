@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Events Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 0.95em;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            margin-top: 10px;
+        }
+
+        .status.active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .events-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+            min-height: 400px;
+        }
+
+        .events-header {
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        .events-header h2 {
+            color: #333;
+            font-size: 1.5em;
+        }
+
+        .event-item {
+            padding: 15px;
+            margin-bottom: 12px;
+            border-left: 4px solid #667eea;
+            background: #f8f9fa;
+            border-radius: 5px;
+            animation: slideIn 0.3s ease-out;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .event-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .event-item.push {
+            border-left-color: #28a745;
+        }
+
+        .event-item.pull_request {
+            border-left-color: #ffc107;
+        }
+
+        .event-item.merge {
+            border-left-color: #6f42c1;
+        }
+
+        .event-message {
+            color: #333;
+            font-size: 0.95em;
+            line-height: 1.6;
+        }
+
+        .event-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 10px;
+        }
+
+        .event-badge.push {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .event-badge.pull_request {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .event-badge.merge {
+            background: #e7d6f5;
+            color: #4a148c;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .empty-state p {
+            font-size: 1.1em;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: white;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 GitHub Events Monitor</h1>
+            <p>Real-time tracking of repository activities</p>
+            <div class="status active" id="status">
+                ● Live - Refreshing every 15 seconds
+            </div>
+        </div>
+
+        <div class="events-container">
+            <div class="events-header">
+                <h2>Recent Events</h2>
+            </div>
+            <div id="events-list">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p>Loading events...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Powered by Flask + MongoDB | Auto-refresh: 15s</p>
+        </div>
+    </div>
+
+    <script>
+        let lastTimestamp = null;
+        let displayedEvents = new Set();
+        let isFirstLoad = true;
+
+        /**
+         * Fetch events from the API
+         */
+        async function fetchEvents() {
+            try {
+                // Build URL with last timestamp parameter
+                let url = '/events';
+                if (lastTimestamp && !isFirstLoad) {
+                    url += `?last_timestamp=${encodeURIComponent(lastTimestamp)}`;
+                }
+
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch events');
+                }
+
+                const data = await response.json();
+                
+                // Update status indicator
+                document.getElementById('status').className = 'status active';
+                document.getElementById('status').textContent = '● Live - Refreshing every 15 seconds';
+
+                // Process and display events
+                if (data.events && data.events.length > 0) {
+                    displayEvents(data.events);
+                    
+                    // Update last timestamp to the most recent event
+                    lastTimestamp = data.events[0].timestamp;
+                } else if (isFirstLoad) {
+                    showEmptyState();
+                }
+
+                isFirstLoad = false;
+
+            } catch (error) {
+                console.error('Error fetching events:', error);
+                document.getElementById('status').className = 'status inactive';
+                document.getElementById('status').textContent = '● Connection Error';
+            }
+        }
+
+        /**
+         * Display events in the UI
+         */
+        function displayEvents(events) {
+            const eventsList = document.getElementById('events-list');
+            
+            // If this is the first load, clear the loading message
+            if (isFirstLoad) {
+                eventsList.innerHTML = '';
+            }
+
+            // Filter out already displayed events
+            const newEvents = events.filter(event => {
+                const eventKey = `${event.timestamp}-${event.message}`;
+                if (displayedEvents.has(eventKey)) {
+                    return false;
+                }
+                displayedEvents.add(eventKey);
+                return true;
+            });
+
+            // Add new events to the top
+            newEvents.reverse().forEach(event => {
+                const eventElement = createEventElement(event);
+                eventsList.insertBefore(eventElement, eventsList.firstChild);
+            });
+
+            // Limit to last 50 events displayed
+            while (eventsList.children.length > 50) {
+                const lastChild = eventsList.lastChild;
+                const lastEventKey = lastChild.dataset.eventKey;
+                displayedEvents.delete(lastEventKey);
+                eventsList.removeChild(lastChild);
+            }
+        }
+
+        /**
+         * Create an event element
+         */
+        function createEventElement(event) {
+            const div = document.createElement('div');
+            div.className = `event-item ${event.action}`;
+            div.dataset.eventKey = `${event.timestamp}-${event.message}`;
+            
+            div.innerHTML = `
+                <div class="event-message">
+                    ${escapeHtml(event.message)}
+                    <span class="event-badge ${event.action}">${event.action.replace('_', ' ')}</span>
+                </div>
+            `;
+            
+            return div;
+        }
+
+        /**
+         * Show empty state when no events exist
+         */
+        function showEmptyState() {
+            const eventsList = document.getElementById('events-list');
+            eventsList.innerHTML = `
+                <div class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                    </svg>
+                    <p>No events yet. Waiting for GitHub activity...</p>
+                </div>
+            `;
+        }
+
+        /**
+         * Escape HTML to prevent XSS
+         */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initial fetch
+        fetchEvents();
+
+        // Poll every 15 seconds
+        setInterval(fetchEvents, 15000);
+    </script>
+</body>
+</html>
