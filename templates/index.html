@@ -70,6 +70,10 @@
         }
 
         .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
             border-bottom: 2px solid #f0f0f0;
             padding-bottom: 15px;
             margin-bottom: 20px;
@@ -78,6 +82,37 @@
         .events-header h2 {
             color: #333;
             font-size: 1.5em;
+        }
+
+        .demo-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-size: 0.85em;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .demo-button:hover {
+            background: #5a6fd6;
+        }
+
+        .demo-button:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .demo-note {
+            background: #f4f6ff;
+            border: 1px solid #e0e4ff;
+            color: #333;
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            font-size: 0.9em;
+            line-height: 1.5;
         }
 
         .event-item {
@@ -113,6 +148,12 @@
             line-height: 1.6;
         }
 
+        .event-meta {
+            color: #777;
+            font-size: 0.8em;
+            margin-top: 6px;
+        }
+
         .event-badge {
             display: inline-block;
             padding: 3px 10px;
@@ -136,6 +177,13 @@
         .event-badge.merge {
             background: #e7d6f5;
             color: #4a148c;
+        }
+
+        .event-badge.sample {
+            background: #e8eefc;
+            color: #3949ab;
+            text-transform: none;
+            margin-left: 6px;
         }
 
         .empty-state {
@@ -192,25 +240,44 @@
             margin-top: 30px;
             color: white;
             font-size: 0.9em;
-            opacity: 0.8;
+            opacity: 0.9;
+        }
+
+        .footer a {
+            color: white;
+        }
+
+        @media (max-width: 640px) {
+            .events-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
         }
     </style>
 </head>
-<body>
+<body data-demo-mode="{{ 'true' if demo_mode else 'false' }}" data-poll-seconds="{{ poll_seconds }}">
     <div class="container">
         <div class="header">
-            <h1>🚀 GitHub Events Monitor</h1>
-            <p>Real-time tracking of repository activities</p>
+            <h1>GitHub Events Monitor</h1>
+            <p>Push, pull request, and merge activity. Built by Anshul Palarpwar.</p>
             <div class="status active" id="status">
-                ● Live - Refreshing every 15 seconds
+                Connecting…
             </div>
         </div>
 
         <div class="events-container">
             <div class="events-header">
                 <h2>Recent Events</h2>
+                {% if demo_mode %}
+                <button class="demo-button" id="replay-demo" type="button">Replay sample events</button>
+                {% endif %}
             </div>
-            <div id="events-list">
+            {% if demo_mode %}
+            <div class="demo-note" id="demo-note">
+                Demo mode is on. Sample rows are labeled “sample”. They are bundled fixtures, not live repository traffic.
+            </div>
+            {% endif %}
+            <div id="events-list" aria-live="polite">
                 <div class="loading">
                     <div class="loading-spinner"></div>
                     <p>Loading events...</p>
@@ -219,140 +286,161 @@
         </div>
 
         <div class="footer">
-            <p>Powered by Flask + MongoDB | Auto-refresh: 15s</p>
+            <p>Flask + MongoDB · polls every {{ poll_seconds }} seconds · <a href="https://github.com/Anshul3977">Anshul Palarpwar</a></p>
         </div>
     </div>
 
     <script>
-        let lastTimestamp = null;
-        let displayedEvents = new Set();
-        let isFirstLoad = true;
+        const pollSeconds = Number(document.body.dataset.pollSeconds || "15");
+        const demoMode = document.body.dataset.demoMode === "true";
+        const knownIds = new Set();
+        let lastSignature = null;
 
-        /**
-         * Fetch events from the API
-         */
+        function statusElement() {
+            return document.getElementById("status");
+        }
+
+        function setConnected() {
+            const checked = new Date().toLocaleTimeString();
+            const status = statusElement();
+            status.className = "status active";
+            status.textContent = `● Connected — refreshes every ${pollSeconds} seconds (last check ${checked})`;
+        }
+
+        function setDisconnected() {
+            const status = statusElement();
+            status.className = "status inactive";
+            status.textContent = "● Connection error — retrying";
+        }
+
         async function fetchEvents() {
             try {
-                // Build URL with last timestamp parameter
-                let url = '/events';
-                if (lastTimestamp && !isFirstLoad) {
-                    url += `?last_timestamp=${encodeURIComponent(lastTimestamp)}`;
-                }
-
-                const response = await fetch(url);
-                
+                const response = await fetch("/events?limit=50");
                 if (!response.ok) {
-                    throw new Error('Failed to fetch events');
+                    throw new Error("Failed to fetch events");
                 }
-
                 const data = await response.json();
-                
-                // Update status indicator
-                document.getElementById('status').className = 'status active';
-                document.getElementById('status').textContent = '● Live - Refreshing every 15 seconds';
-
-                // Process and display events
-                if (data.events && data.events.length > 0) {
-                    displayEvents(data.events);
-                    
-                    // Update last timestamp to the most recent event
-                    lastTimestamp = data.events[0].timestamp;
-                } else if (isFirstLoad) {
-                    showEmptyState();
-                }
-
-                isFirstLoad = false;
-
+                setConnected();
+                displayEvents(data.events || []);
             } catch (error) {
-                console.error('Error fetching events:', error);
-                document.getElementById('status').className = 'status inactive';
-                document.getElementById('status').textContent = '● Connection Error';
+                console.error("Error fetching events:", error);
+                setDisconnected();
             }
         }
 
-        /**
-         * Display events in the UI
-         */
         function displayEvents(events) {
-            const eventsList = document.getElementById('events-list');
-            
-            // If this is the first load, clear the loading message
-            if (isFirstLoad) {
-                eventsList.innerHTML = '';
+            const eventsList = document.getElementById("events-list");
+            if (!events.length) {
+                showEmptyState();
+                lastSignature = "";
+                knownIds.clear();
+                return;
             }
 
-            // Filter out already displayed events
-            const newEvents = events.filter(event => {
-                const eventKey = `${event.timestamp}-${event.message}`;
-                if (displayedEvents.has(eventKey)) {
-                    return false;
+            const signature = events.map((event) => event.delivery_id).join("|");
+            if (signature === lastSignature) {
+                return;
+            }
+            const previous = new Set(knownIds);
+            lastSignature = signature;
+            knownIds.clear();
+            eventsList.innerHTML = "";
+
+            events.forEach((event) => {
+                const element = createEventElement(event);
+                if (previous.has(event.delivery_id)) {
+                    element.style.animation = "none";
                 }
-                displayedEvents.add(eventKey);
-                return true;
+                eventsList.appendChild(element);
+                knownIds.add(event.delivery_id);
             });
-
-            // Add new events to the top
-            newEvents.reverse().forEach(event => {
-                const eventElement = createEventElement(event);
-                eventsList.insertBefore(eventElement, eventsList.firstChild);
-            });
-
-            // Limit to last 50 events displayed
-            while (eventsList.children.length > 50) {
-                const lastChild = eventsList.lastChild;
-                const lastEventKey = lastChild.dataset.eventKey;
-                displayedEvents.delete(lastEventKey);
-                eventsList.removeChild(lastChild);
-            }
         }
 
-        /**
-         * Create an event element
-         */
         function createEventElement(event) {
-            const div = document.createElement('div');
+            const div = document.createElement("div");
             div.className = `event-item ${event.action}`;
-            div.dataset.eventKey = `${event.timestamp}-${event.message}`;
-            
-            div.innerHTML = `
-                <div class="event-message">
-                    ${escapeHtml(event.message)}
-                    <span class="event-badge ${event.action}">${event.action.replace('_', ' ')}</span>
-                </div>
-            `;
-            
+            div.dataset.deliveryId = event.delivery_id;
+
+            const message = document.createElement("div");
+            message.className = "event-message";
+            message.appendChild(document.createTextNode(event.message || ""));
+
+            const badge = document.createElement("span");
+            badge.className = `event-badge ${event.action}`;
+            badge.textContent = String(event.action || "").replace("_", " ");
+            message.appendChild(badge);
+
+            if (event.source === "demo") {
+                const sample = document.createElement("span");
+                sample.className = "event-badge sample";
+                sample.textContent = "sample";
+                message.appendChild(sample);
+            }
+
+            div.appendChild(message);
+
+            const meta = document.createElement("div");
+            meta.className = "event-meta";
+            const parts = [];
+            if (event.repository) {
+                parts.push(event.repository);
+            }
+            if (event.request_id) {
+                parts.push(shortId(event.request_id));
+            }
+            meta.textContent = parts.join(" · ");
+            if (meta.textContent) {
+                div.appendChild(meta);
+            }
             return div;
         }
 
-        /**
-         * Show empty state when no events exist
-         */
+        function shortId(value) {
+            const text = String(value);
+            if (/^[0-9a-f]{20,}$/i.test(text)) {
+                return text.slice(0, 7);
+            }
+            return text;
+        }
+
         function showEmptyState() {
-            const eventsList = document.getElementById('events-list');
+            const eventsList = document.getElementById("events-list");
+            const hint = demoMode
+                ? "No events yet. Replay the bundled samples to see the dashboard without a GitHub webhook."
+                : "No events yet. Waiting for a signed GitHub webhook…";
             eventsList.innerHTML = `
                 <div class="empty-state">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
                     </svg>
-                    <p>No events yet. Waiting for GitHub activity...</p>
+                    <p></p>
                 </div>
             `;
+            eventsList.querySelector(".empty-state p").textContent = hint;
         }
 
-        /**
-         * Escape HTML to prevent XSS
-         */
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        const replayButton = document.getElementById("replay-demo");
+        if (replayButton) {
+            replayButton.addEventListener("click", async () => {
+                replayButton.disabled = true;
+                try {
+                    const response = await fetch("/demo/replay", { method: "POST" });
+                    if (!response.ok) {
+                        throw new Error("Replay failed");
+                    }
+                    lastSignature = null;
+                    await fetchEvents();
+                } catch (error) {
+                    console.error(error);
+                    setDisconnected();
+                } finally {
+                    replayButton.disabled = false;
+                }
+            });
         }
 
-        // Initial fetch
         fetchEvents();
-
-        // Poll every 15 seconds
-        setInterval(fetchEvents, 15000);
+        setInterval(fetchEvents, pollSeconds * 1000);
     </script>
 </body>
 </html>
