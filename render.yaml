@@ -1,0 +1,32 @@
+# Webhook Event Monitor on Render's free web service plan.
+# MongoDB is an Atlas free (M0) cluster that you create. Free Render Postgres
+# expires after 30 days, and this app already stores events in MongoDB.
+# MONGO_URI and WEBHOOK_SECRET are prompted in the Dashboard. Do not commit them.
+
+services:
+  - type: web
+    name: webhook-event-monitor
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: MONGO_DB
+        value: github_events
+      - key: MONGO_COLLECTION
+        value: events
+      - key: DEMO_MODE
+        value: "true"
+      - key: DEMO_TOKEN
+        generateValue: true
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHONUNBUFFERED
+        value: "1"

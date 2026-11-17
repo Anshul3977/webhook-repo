@@ -1,0 +1,22 @@
+{
+  "action": "closed",
+  "repository": {
+    "full_name": "Anshul3977/webhook-repo"
+  },
+  "pull_request": {
+    "id": 42,
+    "number": 7,
+    "user": {
+      "login": "Anshul3977"
+    },
+    "head": {
+      "ref": "feature/dashboard"
+    },
+    "base": {
+      "ref": "main"
+    },
+    "created_at": "2026-01-29T16:49:00Z",
+    "merged": true,
+    "merged_at": "2026-01-29T16:50:00Z"
+  }
+}
